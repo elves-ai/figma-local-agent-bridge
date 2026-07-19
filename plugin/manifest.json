@@ -1,0 +1,13 @@
+{
+  "name": "Figma Local Agent Bridge",
+  "id": "1527606400000000000",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["http://127.0.0.1:3846"],
+    "reasoning": "Connects only to the local MCP bridge running on this computer."
+  }
+}

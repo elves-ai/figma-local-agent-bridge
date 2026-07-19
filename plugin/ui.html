@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Figma Local Agent Bridge</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: Inter, system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 20px;
+        color: var(--figma-color-text);
+        background: var(--figma-color-bg);
+        font-size: 12px;
+      }
+      h1 { margin: 0; font-size: 17px; line-height: 24px; }
+      p { margin: 6px 0 0; color: var(--figma-color-text-secondary); line-height: 18px; }
+      .card {
+        margin-top: 16px;
+        padding: 14px;
+        border: 1px solid var(--figma-color-border);
+        border-radius: 10px;
+        background: var(--figma-color-bg-secondary);
+      }
+      label { display: block; margin: 10px 0 5px; font-weight: 600; }
+      input {
+        width: 100%;
+        height: 32px;
+        padding: 0 9px;
+        color: var(--figma-color-text);
+        background: var(--figma-color-bg);
+        border: 1px solid var(--figma-color-border-strong);
+        border-radius: 6px;
+        outline: none;
+      }
+      input:focus { border-color: var(--figma-color-border-brand); }
+      .row { display: flex; gap: 8px; margin-top: 12px; }
+      button {
+        flex: 1;
+        height: 32px;
+        border: 0;
+        border-radius: 6px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .primary { color: white; background: var(--figma-color-bg-brand); }
+      .secondary { color: var(--figma-color-text); background: var(--figma-color-bg-tertiary); }
+      .status { display: flex; align-items: center; gap: 8px; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--figma-color-icon-tertiary); }
+      .dot.connected { background: #14ae5c; box-shadow: 0 0 0 3px rgba(20, 174, 92, .15); }
+      .meta { margin-top: 10px; display: grid; gap: 6px; }
+      .meta div { display: flex; justify-content: space-between; gap: 12px; }
+      .meta span:first-child { color: var(--figma-color-text-secondary); }
+      .meta span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .log {
+        margin-top: 10px;
+        min-height: 44px;
+        padding: 9px;
+        border-radius: 6px;
+        background: var(--figma-color-bg);
+        color: var(--figma-color-text-secondary);
+        line-height: 16px;
+        white-space: pre-wrap;
+      }
+      .hint { margin-top: 14px; font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <h1>Local Agent Bridge</h1>
+    <p>让 MCP Agent 通过本机桥接读取当前 Figma 文件，不调用 Figma REST API。</p>
+
+    <div class="card">
+      <div class="status">
+        <span id="dot" class="dot"></span>
+        <strong id="status">未连接</strong>
+      </div>
+      <label for="url">本地服务地址</label>
+      <input id="url" value="http://127.0.0.1:3846" spellcheck="false" />
+      <label for="token">会话令牌</label>
+      <input id="token" type="password" placeholder="从 Agent 的 bridge_status 结果复制" />
+      <div class="row">
+        <button id="connect" class="primary">连接</button>
+        <button id="disconnect" class="secondary">断开</button>
+      </div>
+      <div id="log" class="log">先启动 MCP 服务，再填写会话令牌。</div>
+    </div>
+
+    <div class="card">
+      <strong>当前上下文</strong>
+      <div class="meta">
+        <div><span>文件</span><span id="file">—</span></div>
+        <div><span>页面</span><span id="page">—</span></div>
+        <div><span>选中节点</span><span id="selection">0</span></div>
+      </div>
+    </div>
+
+    <p class="hint">安全说明：只连接 127.0.0.1，并要求随机令牌。插件仅支持读取节点、页面和本地变量。</p>
+
+    <script>
+      const elements = {
+        url: document.getElementById("url"),
+        token: document.getElementById("token"),
+        connect: document.getElementById("connect"),
+        disconnect: document.getElementById("disconnect"),
+        status: document.getElementById("status"),
+        dot: document.getElementById("dot"),
+        log: document.getElementById("log"),
+        file: document.getElementById("file"),
+        page: document.getElementById("page"),
+        selection: document.getElementById("selection"),
+      };
+
+      let connected = false;
+      let polling = false;
+      let context = { fileName: "", pageName: "", selection: [] };
+
+      elements.url.value = localStorage.getItem("figmaBridgeUrl") || elements.url.value;
+      elements.token.value = localStorage.getItem("figmaBridgeToken") || "";
+
+      function setLog(message) { elements.log.textContent = message; }
+      function setConnected(value) {
+        connected = value;
+        elements.status.textContent = value ? "已连接，等待 Agent 命令" : "未连接";
+        elements.dot.classList.toggle("connected", value);
+      }
+      function headers() {
+        return {
+          "content-type": "application/json",
+          "x-figma-bridge-token": elements.token.value.trim(),
+        };
+      }
+      function endpoint(path) {
+        return elements.url.value.trim().replace(/\/$/, "") + path;
+      }
+
+      async function heartbeat() {
+        const response = await fetch(endpoint("/v1/plugin/heartbeat"), {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify(context),
+        });
+        if (!response.ok) throw new Error(`Heartbeat HTTP ${response.status}`);
+      }
+
+      async function poll() {
+        if (!connected || polling) return;
+        polling = true;
+        try {
+          await heartbeat();
+          const response = await fetch(endpoint("/v1/commands/next"), { headers: headers() });
+          if (response.status === 200) {
+            const command = await response.json();
+            parent.postMessage({ pluginMessage: { type: "bridge-command", command } }, "*");
+            setLog(`执行命令：${command.action}`);
+          } else if (response.status !== 204) {
+            throw new Error(`Poll HTTP ${response.status}`);
+          }
+        } catch (error) {
+          setConnected(false);
+          setLog(`连接中断：${error.message || error}`);
+        } finally {
+          polling = false;
+        }
+      }
+
+      async function connect() {
+        const url = elements.url.value.trim();
+        const token = elements.token.value.trim();
+        if (!/^http:\/\/(127\.0\.0\.1|localhost):3846$/.test(url)) {
+          setLog("地址必须是 http://127.0.0.1:3846 或 http://localhost:3846");
+          return;
+        }
+        if (!token) { setLog("请输入会话令牌"); return; }
+        localStorage.setItem("figmaBridgeUrl", url);
+        localStorage.setItem("figmaBridgeToken", token);
+        try {
+          await heartbeat();
+          setConnected(true);
+          setLog("连接成功。现在 Agent 可以调用只读 Figma 工具。");
+        } catch (error) {
+          setConnected(false);
+          setLog(`连接失败：${error.message || error}`);
+        }
+      }
+
+      async function submitResult(message) {
+        try {
+          const response = await fetch(endpoint(`/v1/commands/${encodeURIComponent(message.commandId)}/result`), {
+            method: "POST",
+            headers: headers(),
+            body: JSON.stringify({ ok: message.ok, data: message.data, error: message.error }),
+          });
+          if (!response.ok) throw new Error(`Result HTTP ${response.status}`);
+          setLog(message.ok ? "命令完成，结果已返回 Agent。" : `命令失败：${message.error}`);
+        } catch (error) {
+          setLog(`结果回传失败：${error.message || error}`);
+        }
+      }
+
+      window.onmessage = (event) => {
+        const message = event.data.pluginMessage;
+        if (!message) return;
+        if (message.type === "figma-context") {
+          context = message;
+          elements.file.textContent = message.fileName || "—";
+          elements.page.textContent = message.pageName || "—";
+          elements.selection.textContent = String((message.selection || []).length);
+        } else if (message.type === "bridge-result") {
+          submitResult(message);
+        }
+      };
+
+      elements.connect.onclick = connect;
+      elements.disconnect.onclick = () => {
+        setConnected(false);
+        setLog("已断开。插件仍保持打开，可随时重新连接。");
+      };
+      setInterval(poll, 650);
+    </script>
+  </body>
+</html>
