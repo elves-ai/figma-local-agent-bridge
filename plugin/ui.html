@@ -81,12 +81,12 @@
       <label for="url">本地服务地址</label>
       <input id="url" value="http://localhost:3846" spellcheck="false" />
       <label for="token">会话令牌</label>
-      <input id="token" type="password" placeholder="从 Agent 的 bridge_status 结果复制" />
+      <input id="token" type="password" placeholder="由本地配置自动填写" />
       <div class="row">
         <button id="connect" class="primary">连接</button>
         <button id="disconnect" class="secondary">断开</button>
       </div>
-      <div id="log" class="log">先启动 MCP 服务，再填写会话令牌。</div>
+      <div id="log" class="log">正在等待 Codex 启动本地桥接服务…</div>
     </div>
 
     <div class="card">
@@ -98,7 +98,7 @@
       </div>
     </div>
 
-    <p class="hint">安全说明：只连接 127.0.0.1，并要求随机令牌。插件仅支持读取节点、页面和本地变量。</p>
+    <p class="hint">安全说明：只连接 127.0.0.1，并要求本机共享令牌。插件仅支持读取节点、页面和本地变量。</p>
 
     <script>
       const elements = {
@@ -114,12 +114,14 @@
         selection: document.getElementById("selection"),
       };
 
+      const DEFAULT_BRIDGE_TOKEN = "9f5084ed4b871c3c8f13339301ee617d1d8a013f2355d232";
+      const SETTINGS_VERSION = 1;
       let connected = false;
       let polling = false;
+      let connecting = false;
+      let autoReconnect = true;
+      let lastConnectAttempt = 0;
       let context = { fileName: "", pageName: "", selection: [] };
-
-      elements.url.value = localStorage.getItem("figmaBridgeUrl") || elements.url.value;
-      elements.token.value = localStorage.getItem("figmaBridgeToken") || "";
 
       function setLog(message) { elements.log.textContent = message; }
       function setConnected(value) {
@@ -167,7 +169,8 @@
         }
       }
 
-      async function connect() {
+      async function connect({ persist = true } = {}) {
+        if (connecting) return;
         const url = elements.url.value.trim();
         const token = elements.token.value.trim();
         if (url !== "http://localhost:3846") {
@@ -175,15 +178,36 @@
           return;
         }
         if (!token) { setLog("请输入会话令牌"); return; }
-        localStorage.setItem("figmaBridgeUrl", url);
-        localStorage.setItem("figmaBridgeToken", token);
+        connecting = true;
+        lastConnectAttempt = Date.now();
+        if (persist) {
+          parent.postMessage({
+            pluginMessage: {
+              type: "bridge-settings-set",
+              settings: { version: SETTINGS_VERSION, url, token },
+            },
+          }, "*");
+        }
+        setLog("正在自动连接本地桥接服务…");
         try {
           await heartbeat();
           setConnected(true);
           setLog("连接成功。现在 Agent 可以调用只读 Figma 工具。");
         } catch (error) {
           setConnected(false);
-          setLog(`连接失败：${error.message || error}`);
+          setLog("等待 Codex 启动本地桥接服务…");
+        } finally {
+          connecting = false;
+        }
+      }
+
+      async function maintainConnection() {
+        if (connected) {
+          await poll();
+          return;
+        }
+        if (autoReconnect && Date.now() - lastConnectAttempt >= 1500) {
+          await connect({ persist: false });
         }
       }
 
@@ -209,17 +233,30 @@
           elements.file.textContent = message.fileName || "—";
           elements.page.textContent = message.pageName || "—";
           elements.selection.textContent = String((message.selection || []).length);
+        } else if (message.type === "bridge-settings") {
+          const settings = message.settings || {};
+          if (settings.url) elements.url.value = settings.url;
+          elements.token.value = settings.version === SETTINGS_VERSION && settings.token
+            ? settings.token
+            : DEFAULT_BRIDGE_TOKEN;
+          autoReconnect = true;
+          connect({ persist: true });
         } else if (message.type === "bridge-result") {
           submitResult(message);
         }
       };
 
-      elements.connect.onclick = connect;
+      elements.connect.onclick = () => {
+        autoReconnect = true;
+        connect({ persist: true });
+      };
       elements.disconnect.onclick = () => {
+        autoReconnect = false;
         setConnected(false);
         setLog("已断开。插件仍保持打开，可随时重新连接。");
       };
-      setInterval(poll, 650);
+      parent.postMessage({ pluginMessage: { type: "bridge-settings-get" } }, "*");
+      setInterval(maintainConnection, 650);
     </script>
   </body>
 </html>

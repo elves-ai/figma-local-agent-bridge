@@ -338,7 +338,20 @@ async function executeCommand(command) {
 }
 
 figma.ui.onmessage = async (message) => {
-  if (!message || message.type !== "bridge-command") return;
+  if (!message) return;
+  if (message.type === "bridge-settings-get") {
+    const settings = await figma.clientStorage.getAsync("bridgeSettings");
+    figma.ui.postMessage({
+      type: "bridge-settings",
+      settings: settings || {},
+    });
+    return;
+  }
+  if (message.type === "bridge-settings-set") {
+    await figma.clientStorage.setAsync("bridgeSettings", message.settings || {});
+    return;
+  }
+  if (message.type !== "bridge-command") return;
   try {
     const data = await executeCommand(message.command);
     figma.ui.postMessage({
