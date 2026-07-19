@@ -7,7 +7,7 @@
   "editorType": ["figma"],
   "documentAccess": "dynamic-page",
   "networkAccess": {
-    "allowedDomains": ["http://127.0.0.1:3846"],
+    "allowedDomains": ["http://localhost:3846"],
     "reasoning": "Connects only to the local MCP bridge running on this computer."
   }
 }

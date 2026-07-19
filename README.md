@@ -79,7 +79,7 @@ claude mcp add figma-local -- node /absolute/path/figma-local-agent-bridge/serve
 1. 重启或刷新 Agent 的 MCP 服务。
 2. 让 Agent 调用 `figma_bridge_status`。
 3. 将返回的 `bridgeToken` 填入 Figma 插件。
-4. 保持地址为 `http://127.0.0.1:3846`，点击“连接”。
+4. 保持地址为 `http://localhost:3846`，点击“连接”。
 5. Agent 再次调用 `figma_bridge_status`，应看到 `connected: true`。
 
 随后 Agent 可以调用：
@@ -91,7 +91,7 @@ claude mcp add figma-local -- node /absolute/path/figma-local-agent-bridge/serve
 
 ## 多 Agent 使用
 
-每个 Agent 都可以配置此 MCP 服务。由于插件固定连接 `127.0.0.1:3846`，同一时间只运行一个 Agent 的桥接实例；切换 Agent 时关闭前一个实例，再启动另一个即可。
+每个 Agent 都可以配置此 MCP 服务。由于插件固定连接 `localhost:3846`，同一时间只运行一个 Agent 的桥接实例；切换 Agent 时关闭前一个实例，再启动另一个即可。
 
 如果需要固定令牌，可设置：
 
@@ -106,6 +106,6 @@ FIGMA_BRIDGE_TOKEN="replace-with-a-long-random-value" node server.mjs
 - 校验 `Host` 头，降低 DNS rebinding 风险。
 - Agent 只能调用白名单只读命令。
 - 单次请求最多读取 10,000 个节点，默认 2,000 个。
-- 插件只允许访问 `http://127.0.0.1:3846`。
+- 插件只允许访问 `http://localhost:3846`。
 
 设计文件内容会发送给本机已连接的 Agent，因此仅应连接你信任的 Agent。

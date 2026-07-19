@@ -12,7 +12,7 @@ const transport = new StdioClientTransport({
     ...process.env,
     FIGMA_BRIDGE_TOKEN: "smoke-test-token",
   },
-  stderr: "pipe",
+  stderr: "inherit",
 });
 
 try {
@@ -35,7 +35,7 @@ try {
   const status = JSON.parse(result.content[0].text);
   assert.equal(status.connected, false);
   assert.equal(status.bridgeToken, "smoke-test-token");
-  assert.equal(status.bridgeUrl, "http://127.0.0.1:3846");
+  assert.equal(status.bridgeUrl, "http://localhost:3846");
 
   const healthResponse = await fetch("http://127.0.0.1:3846/health");
   assert.equal(healthResponse.status, 200);

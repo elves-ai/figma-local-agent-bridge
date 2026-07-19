@@ -227,7 +227,7 @@ mcp.registerTool(
         text: JSON.stringify(
           {
             connected: pluginConnected(),
-            bridgeUrl: `http://${HOST}:${PORT}`,
+            bridgeUrl: `http://localhost:${PORT}`,
             bridgeToken: TOKEN,
             fileName: pluginState.fileName,
             pageName: pluginState.pageName,
