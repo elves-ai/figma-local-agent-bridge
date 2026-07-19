@@ -51,9 +51,6 @@ command = "node"
 args = ["/absolute/path/figma-local-agent-bridge/server/server.mjs"]
 startup_timeout_sec = 30
 tool_timeout_sec = 60
-
-[mcp_servers.figmaLocal.env]
-FIGMA_BRIDGE_TOKEN = "replace-with-a-long-random-value"
 ```
 
 ### Claude Code
@@ -80,9 +77,8 @@ claude mcp add figma-local -- node /absolute/path/figma-local-agent-bridge/serve
 ## 四、连接插件
 
 1. 重启或刷新 Agent 的 MCP 服务。
-2. 为 MCP 服务配置固定的 `FIGMA_BRIDGE_TOKEN`，并让插件使用相同令牌。
-3. 打开插件后，它会自动连接；如果 MCP 服务尚未启动，插件会持续重试。
-4. 让 Agent 调用 `figma_bridge_status`，应看到 `connected: true`。
+2. 打开插件后，它会自动连接；如果 MCP 服务尚未启动，插件会持续重试。
+3. 让 Agent 调用 `figma_bridge_status`，应看到 `connected: true`。
 
 随后 Agent 可以调用：
 
@@ -95,16 +91,9 @@ claude mcp add figma-local -- node /absolute/path/figma-local-agent-bridge/serve
 
 每个 Agent 都可以配置此 MCP 服务。由于插件固定连接 `localhost:3846`，同一时间只运行一个 Agent 的桥接实例；切换 Agent 时关闭前一个实例，再启动另一个即可。
 
-自动重连需要固定令牌。可设置：
-
-```bash
-FIGMA_BRIDGE_TOKEN="replace-with-a-long-random-value" node server.mjs
-```
-
 ## 安全模型
 
 - 服务只监听 `127.0.0.1`，不会暴露到局域网。
-- 所有插件请求都必须携带本机共享令牌；为支持自动重连，该令牌应固定配置并妥善保管。
 - 校验 `Host` 头，降低 DNS rebinding 风险。
 - Agent 只能调用白名单只读命令。
 - 单次请求最多读取 10,000 个节点，默认 2,000 个。

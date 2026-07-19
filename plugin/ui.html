@@ -80,8 +80,6 @@
       </div>
       <label for="url">本地服务地址</label>
       <input id="url" value="http://localhost:3846" spellcheck="false" />
-      <label for="token">会话令牌</label>
-      <input id="token" type="password" placeholder="由本地配置自动填写" />
       <div class="row">
         <button id="connect" class="primary">连接</button>
         <button id="disconnect" class="secondary">断开</button>
@@ -98,12 +96,11 @@
       </div>
     </div>
 
-    <p class="hint">安全说明：只连接 127.0.0.1，并要求本机共享令牌。插件仅支持读取节点、页面和本地变量。</p>
+    <p class="hint">安全说明：服务只监听本机地址，插件仅支持读取节点、页面和本地变量。</p>
 
     <script>
       const elements = {
         url: document.getElementById("url"),
-        token: document.getElementById("token"),
         connect: document.getElementById("connect"),
         disconnect: document.getElementById("disconnect"),
         status: document.getElementById("status"),
@@ -114,8 +111,7 @@
         selection: document.getElementById("selection"),
       };
 
-      const DEFAULT_BRIDGE_TOKEN = "9f5084ed4b871c3c8f13339301ee617d1d8a013f2355d232";
-      const SETTINGS_VERSION = 1;
+      const SETTINGS_VERSION = 2;
       let connected = false;
       let polling = false;
       let connecting = false;
@@ -130,10 +126,7 @@
         elements.dot.classList.toggle("connected", value);
       }
       function headers() {
-        return {
-          "content-type": "application/json",
-          "x-figma-bridge-token": elements.token.value.trim(),
-        };
+        return { "content-type": "application/json" };
       }
       function endpoint(path) {
         return elements.url.value.trim().replace(/\/$/, "") + path;
@@ -172,19 +165,17 @@
       async function connect({ persist = true } = {}) {
         if (connecting) return;
         const url = elements.url.value.trim();
-        const token = elements.token.value.trim();
         if (url !== "http://localhost:3846") {
           setLog("地址必须是 http://localhost:3846");
           return;
         }
-        if (!token) { setLog("请输入会话令牌"); return; }
         connecting = true;
         lastConnectAttempt = Date.now();
         if (persist) {
           parent.postMessage({
             pluginMessage: {
               type: "bridge-settings-set",
-              settings: { version: SETTINGS_VERSION, url, token },
+              settings: { version: SETTINGS_VERSION, url },
             },
           }, "*");
         }
@@ -236,9 +227,6 @@
         } else if (message.type === "bridge-settings") {
           const settings = message.settings || {};
           if (settings.url) elements.url.value = settings.url;
-          elements.token.value = settings.version === SETTINGS_VERSION && settings.token
-            ? settings.token
-            : DEFAULT_BRIDGE_TOKEN;
           autoReconnect = true;
           connect({ persist: true });
         } else if (message.type === "bridge-result") {

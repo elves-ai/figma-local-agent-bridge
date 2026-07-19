@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import http from "node:http";
 import process from "node:process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -9,7 +9,6 @@ import { z } from "zod";
 
 const HOST = "127.0.0.1";
 const PORT = 3846;
-const TOKEN = process.env.FIGMA_BRIDGE_TOKEN || randomBytes(18).toString("base64url");
 const COMMAND_TIMEOUT_MS = Number(process.env.FIGMA_BRIDGE_TIMEOUT_MS || 30000);
 const MAX_BODY_BYTES = 25 * 1024 * 1024;
 
@@ -26,14 +25,6 @@ function log(message) {
   process.stderr.write(`[figma-local-bridge] ${message}\n`);
 }
 
-function tokenDigest(value) {
-  return createHash("sha256").update(String(value)).digest();
-}
-
-function tokenMatches(value) {
-  return timingSafeEqual(tokenDigest(value || ""), tokenDigest(TOKEN));
-}
-
 function pluginConnected() {
   return Date.now() - pluginState.lastSeen < 6000;
 }
@@ -41,10 +32,7 @@ function pluginConnected() {
 function setCors(response) {
   response.setHeader("Access-Control-Allow-Origin", "*");
   response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  response.setHeader(
-    "Access-Control-Allow-Headers",
-    "Content-Type,X-Figma-Bridge-Token",
-  );
+  response.setHeader("Access-Control-Allow-Headers", "*");
   response.setHeader("Cache-Control", "no-store");
 }
 
@@ -99,11 +87,6 @@ async function httpHandler(request, response) {
     sendJson(response, 200, { ok: true, pluginConnected: pluginConnected() });
     return;
   }
-  if (!tokenMatches(request.headers["x-figma-bridge-token"])) {
-    sendJson(response, 401, { error: "Invalid bridge token." });
-    return;
-  }
-
   try {
     if (request.url === "/v1/plugin/heartbeat" && request.method === "POST") {
       const body = await readJson(request);
@@ -156,7 +139,7 @@ function sendCommand(action, input = {}) {
   if (!pluginConnected()) {
     return Promise.reject(
       new Error(
-        `Figma plugin is not connected. Open the local plugin, use http://${HOST}:${PORT}, and enter bridge token: ${TOKEN}`,
+        `Figma plugin is not connected. Open the local plugin and use http://${HOST}:${PORT}.`,
       ),
     );
   }
@@ -228,7 +211,6 @@ mcp.registerTool(
           {
             connected: pluginConnected(),
             bridgeUrl: `http://localhost:${PORT}`,
-            bridgeToken: TOKEN,
             fileName: pluginState.fileName,
             pageName: pluginState.pageName,
             selection: pluginState.selection,
@@ -308,7 +290,6 @@ mcp.registerTool(
 const bridgeHttpServer = http.createServer(httpHandler);
 bridgeHttpServer.listen(PORT, HOST, () => {
   log(`HTTP bridge listening at http://${HOST}:${PORT}`);
-  log(`Bridge token: ${TOKEN}`);
 });
 
 const transport = new StdioServerTransport();
