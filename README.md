@@ -77,8 +77,12 @@ claude mcp add figma-local -- node /absolute/path/figma-local-agent-bridge/serve
 ## 四、连接插件
 
 1. 重启或刷新 Agent 的 MCP 服务。
-2. 打开插件后，它会自动连接；如果 MCP 服务尚未启动，插件会持续重试。
+2. 打开插件后，它会自动连接；如果 MCP 服务尚未启动或连接短暂中断，插件会持续重试。
 3. 让 Agent 调用 `figma_bridge_status`，应看到 `connected: true`。
+
+连接偏好会保存在 Figma 本地：默认自动连接；用户点击“断开”后，即使重新打开插件也会保持断开，直到再次点击“连接”。
+
+Codex 会根据 `[mcp_servers.figmaLocal]` 配置，在启动任务时自动拉起 MCP 进程，并在任务结束时关闭它，无需单独运行 `npm start`。
 
 随后 Agent 可以调用：
 

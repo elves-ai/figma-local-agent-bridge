@@ -40,6 +40,49 @@ try {
     pluginConnected: false,
   });
 
+  const heartbeatResponse = await fetch(
+    "http://127.0.0.1:3846/v1/plugin/heartbeat",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        clientId: "smoke-test-plugin",
+        fileName: "Smoke Test",
+        pageName: "Page 1",
+        selection: [],
+      }),
+    },
+  );
+  assert.equal(heartbeatResponse.status, 200);
+
+  const connectedStatus = await client.callTool({
+    name: "figma_bridge_status",
+    arguments: {},
+  });
+  assert.equal(JSON.parse(connectedStatus.content[0].text).connected, true);
+
+  const staleDisconnectResponse = await fetch(
+    "http://127.0.0.1:3846/v1/plugin/disconnect",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clientId: "older-plugin-window" }),
+    },
+  );
+  assert.equal(staleDisconnectResponse.status, 200);
+  const stillConnectedHealth = await fetch("http://127.0.0.1:3846/health");
+  assert.equal((await stillConnectedHealth.json()).pluginConnected, true);
+
+  const disconnectResponse = await fetch(
+    "http://127.0.0.1:3846/v1/plugin/disconnect",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clientId: "smoke-test-plugin" }),
+    },
+  );
+  assert.equal(disconnectResponse.status, 200);
+
   const nextCommandResponse = await fetch(
     "http://127.0.0.1:3846/v1/commands/next",
   );

@@ -111,7 +111,8 @@
         selection: document.getElementById("selection"),
       };
 
-      const SETTINGS_VERSION = 2;
+      const SETTINGS_VERSION = 3;
+      const clientId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       let connected = false;
       let polling = false;
       let connecting = false;
@@ -136,9 +137,34 @@
         const response = await fetch(endpoint("/v1/plugin/heartbeat"), {
           method: "POST",
           headers: headers(),
-          body: JSON.stringify(context),
+          body: JSON.stringify({ ...context, clientId }),
         });
         if (!response.ok) throw new Error(`Heartbeat HTTP ${response.status}`);
+      }
+
+      async function notifyDisconnect() {
+        try {
+          await fetch(endpoint("/v1/plugin/disconnect"), {
+            method: "POST",
+            headers: headers(),
+            body: JSON.stringify({ clientId }),
+          });
+        } catch (_error) {
+          // The service may already be offline; the persisted intent is authoritative.
+        }
+      }
+
+      function saveSettings() {
+        parent.postMessage({
+          pluginMessage: {
+            type: "bridge-settings-set",
+            settings: {
+              version: SETTINGS_VERSION,
+              url: elements.url.value.trim(),
+              autoConnect: autoReconnect,
+            },
+          },
+        }, "*");
       }
 
       async function poll() {
@@ -171,14 +197,7 @@
         }
         connecting = true;
         lastConnectAttempt = Date.now();
-        if (persist) {
-          parent.postMessage({
-            pluginMessage: {
-              type: "bridge-settings-set",
-              settings: { version: SETTINGS_VERSION, url },
-            },
-          }, "*");
-        }
+        if (persist) saveSettings();
         setLog("正在自动连接本地桥接服务…");
         try {
           await heartbeat();
@@ -227,8 +246,13 @@
         } else if (message.type === "bridge-settings") {
           const settings = message.settings || {};
           if (settings.url) elements.url.value = settings.url;
-          autoReconnect = true;
-          connect({ persist: true });
+          autoReconnect = settings.autoConnect !== false;
+          if (autoReconnect) {
+            connect({ persist: settings.version !== SETTINGS_VERSION });
+          } else {
+            setConnected(false);
+            setLog("已按用户设置保持断开。点击“连接”可恢复自动连接。");
+          }
         } else if (message.type === "bridge-result") {
           submitResult(message);
         }
@@ -238,10 +262,12 @@
         autoReconnect = true;
         connect({ persist: true });
       };
-      elements.disconnect.onclick = () => {
+      elements.disconnect.onclick = async () => {
         autoReconnect = false;
+        saveSettings();
+        await notifyDisconnect();
         setConnected(false);
-        setLog("已断开。插件仍保持打开，可随时重新连接。");
+        setLog("已手动断开。重新打开插件也会保持断开，直到你点击“连接”。");
       };
       parent.postMessage({ pluginMessage: { type: "bridge-settings-get" } }, "*");
       setInterval(maintainConnection, 650);
