@@ -1,187 +1,71 @@
 #!/usr/bin/env node
 
-import { randomUUID } from "node:crypto";
-import http from "node:http";
 import process from "node:process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-const HOST = "127.0.0.1";
-const PORT = 3846;
+const BRIDGE_URL = (
+  process.env.FIGMA_BRIDGE_URL || "http://localhost:3846"
+).replace(/\/$/, "");
 const COMMAND_TIMEOUT_MS = Number(process.env.FIGMA_BRIDGE_TIMEOUT_MS || 30000);
-const MAX_BODY_BYTES = 25 * 1024 * 1024;
 
-const queuedCommands = [];
-const pendingCommands = new Map();
-let pluginState = {
-  lastSeen: 0,
-  clientId: null,
-  fileName: null,
-  pageName: null,
-  selection: [],
-};
-let shuttingDown = false;
-
-function log(message) {
-  process.stderr.write(`[figma-local-bridge] ${message}\n`);
-}
-
-function pluginConnected() {
-  return Date.now() - pluginState.lastSeen < 6000;
-}
-
-function disconnectPlugin(reason) {
-  pluginState = {
-    lastSeen: 0,
-    clientId: null,
-    fileName: null,
-    pageName: null,
-    selection: [],
-  };
-  queuedCommands.length = 0;
-  for (const pending of pendingCommands.values()) {
-    clearTimeout(pending.timer);
-    pending.reject(new Error(reason));
-  }
-  pendingCommands.clear();
-}
-
-function setCors(response) {
-  response.setHeader("Access-Control-Allow-Origin", "*");
-  response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  response.setHeader("Access-Control-Allow-Headers", "*");
-  response.setHeader("Cache-Control", "no-store");
-}
-
-function sendJson(response, status, value) {
-  setCors(response);
-  response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-  response.end(JSON.stringify(value));
-}
-
-function validateHost(request) {
-  const host = request.headers.host || "";
-  return host === `${HOST}:${PORT}` || host === `localhost:${PORT}`;
-}
-
-function readJson(request) {
-  return new Promise((resolve, reject) => {
-    let size = 0;
-    const chunks = [];
-    request.on("data", (chunk) => {
-      size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
-        reject(new Error("Request body is too large."));
-        request.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    request.on("end", () => {
-      try {
-        const text = Buffer.concat(chunks).toString("utf8");
-        resolve(text ? JSON.parse(text) : {});
-      } catch (_error) {
-        reject(new Error("Invalid JSON request body."));
-      }
-    });
-    request.on("error", reject);
-  });
-}
-
-async function httpHandler(request, response) {
-  setCors(response);
-  if (request.method === "OPTIONS") {
-    response.writeHead(204);
-    response.end();
-    return;
-  }
-  if (!validateHost(request)) {
-    sendJson(response, 403, { error: "Invalid Host header." });
-    return;
-  }
-  if (request.url === "/health" && request.method === "GET") {
-    sendJson(response, 200, { ok: true, pluginConnected: pluginConnected() });
-    return;
-  }
+async function bridgeRequest(path, options = {}) {
+  let response;
   try {
-    if (request.url === "/v1/plugin/heartbeat" && request.method === "POST") {
-      const body = await readJson(request);
-      pluginState = {
-        lastSeen: Date.now(),
-        clientId: typeof body.clientId === "string" ? body.clientId : null,
-        fileName: body.fileName || null,
-        pageName: body.pageName || null,
-        selection: Array.isArray(body.selection) ? body.selection.slice(0, 100) : [],
-      };
-      sendJson(response, 200, { ok: true });
-      return;
-    }
-
-    if (request.url === "/v1/plugin/disconnect" && request.method === "POST") {
-      const body = await readJson(request);
-      if (!body.clientId || body.clientId === pluginState.clientId) {
-        disconnectPlugin("Figma plugin was disconnected by the user.");
-      }
-      sendJson(response, 200, { ok: true });
-      return;
-    }
-
-    if (request.url === "/v1/commands/next" && request.method === "GET") {
-      const command = queuedCommands.shift();
-      if (!command) {
-        response.writeHead(204);
-        response.end();
-        return;
-      }
-      sendJson(response, 200, command);
-      return;
-    }
-
-    const resultMatch = request.url?.match(/^\/v1\/commands\/([^/]+)\/result$/);
-    if (resultMatch && request.method === "POST") {
-      const commandId = decodeURIComponent(resultMatch[1]);
-      const pending = pendingCommands.get(commandId);
-      const body = await readJson(request);
-      if (!pending) {
-        sendJson(response, 404, { error: "Unknown or expired command." });
-        return;
-      }
-      clearTimeout(pending.timer);
-      pendingCommands.delete(commandId);
-      pending.resolve(body);
-      sendJson(response, 200, { ok: true });
-      return;
-    }
-
-    sendJson(response, 404, { error: "Not found." });
-  } catch (error) {
-    sendJson(response, 400, {
-      error: error instanceof Error ? error.message : String(error),
+    response = await fetch(`${BRIDGE_URL}${path}`, {
+      ...options,
+      signal: AbortSignal.timeout(COMMAND_TIMEOUT_MS + 2000),
     });
-  }
-}
-
-function sendCommand(action, input = {}) {
-  if (!pluginConnected()) {
-    return Promise.reject(
-      new Error(
-        `Figma plugin is not connected. Open the local plugin and use http://${HOST}:${PORT}.`,
-      ),
+  } catch (error) {
+    throw new Error(
+      `Local bridge service is not running at ${BRIDGE_URL}. Start it with "npm start" in the server directory.`,
+      { cause: error },
     );
   }
 
-  const id = randomUUID();
-  queuedCommands.push({ id, action, input });
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      pendingCommands.delete(id);
-      const queueIndex = queuedCommands.findIndex((item) => item.id === id);
-      if (queueIndex >= 0) queuedCommands.splice(queueIndex, 1);
-      reject(new Error(`Figma command timed out after ${COMMAND_TIMEOUT_MS}ms.`));
-    }, COMMAND_TIMEOUT_MS);
-    pendingCommands.set(id, { resolve, reject, timer });
+  const text = await response.text();
+  let body = {};
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch (_error) {
+    throw new Error(`Local bridge returned invalid JSON (HTTP ${response.status}).`);
+  }
+  if (!response.ok) {
+    throw new Error(body.error || `Local bridge HTTP ${response.status}.`);
+  }
+  return body;
+}
+
+async function bridgeStatus() {
+  try {
+    const status = await bridgeRequest("/health");
+    return {
+      serviceRunning: true,
+      connected: status.pluginConnected === true,
+      bridgeUrl: BRIDGE_URL,
+      fileName: status.fileName || null,
+      pageName: status.pageName || null,
+      selection: Array.isArray(status.selection) ? status.selection : [],
+    };
+  } catch (error) {
+    return {
+      serviceRunning: false,
+      connected: false,
+      bridgeUrl: BRIDGE_URL,
+      fileName: null,
+      pageName: null,
+      selection: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function sendCommand(action, input = {}) {
+  return bridgeRequest("/v1/agent/commands", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action, input }),
   });
 }
 
@@ -194,6 +78,29 @@ function toolResult(value) {
   }
   return {
     content: [{ type: "text", text: JSON.stringify(value.data, null, 2) }],
+  };
+}
+
+function imageToolResult(value) {
+  if (!value.ok) return toolResult(value);
+  const data = value.data || {};
+  if (
+    typeof data.base64 !== "string" ||
+    !data.base64 ||
+    typeof data.mimeType !== "string" ||
+    !data.mimeType.startsWith("image/")
+  ) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: "Figma plugin returned invalid image data." }],
+    };
+  }
+  const { base64, ...metadata } = data;
+  return {
+    content: [
+      { type: "text", text: JSON.stringify(metadata, null, 2) },
+      { type: "image", data: base64, mimeType: data.mimeType },
+    ],
   };
 }
 
@@ -217,17 +124,18 @@ const traversalSchema = {
 };
 
 const mcp = new McpServer(
-  { name: "figma-local-agent-bridge", version: "1.0.0" },
+  { name: "figma-local-agent-bridge", version: "1.2.0" },
   {
     instructions:
-      "This server reads the Figma file currently open in the local development plugin. Call figma_bridge_status first. All tools are read-only and require the plugin window to remain open.",
+      "This server reads and exports from the Figma file connected to the local foreground bridge. Call figma_bridge_status first. All tools are read-only.",
   },
 );
 
 mcp.registerTool(
   "figma_bridge_status",
   {
-    description: "Check whether the local Figma plugin is connected and show setup details.",
+    description:
+      "Check whether the local foreground bridge service and Figma plugin are connected.",
     inputSchema: z.object({}),
     annotations: { readOnlyHint: true, destructiveHint: false },
   },
@@ -235,17 +143,7 @@ mcp.registerTool(
     content: [
       {
         type: "text",
-        text: JSON.stringify(
-          {
-            connected: pluginConnected(),
-            bridgeUrl: `http://localhost:${PORT}`,
-            fileName: pluginState.fileName,
-            pageName: pluginState.pageName,
-            selection: pluginState.selection,
-          },
-          null,
-          2,
-        ),
+        text: JSON.stringify(await bridgeStatus(), null, 2),
       },
     ],
   }),
@@ -315,38 +213,43 @@ mcp.registerTool(
   },
 );
 
-const bridgeHttpServer = http.createServer(httpHandler);
-bridgeHttpServer.listen(PORT, HOST, () => {
-  log(`HTTP bridge listening at http://${HOST}:${PORT}`);
-});
-bridgeHttpServer.on("error", (error) => {
-  log(
-    error?.code === "EADDRINUSE"
-      ? `Port ${PORT} is already in use. Stop the previous bridge process and restart Codex.`
-      : `HTTP bridge failed: ${error instanceof Error ? error.message : String(error)}`,
-  );
-  process.exitCode = 1;
-  shutdown();
-});
+mcp.registerTool(
+  "figma_export_node",
+  {
+    description:
+      "Export a Figma node with Figma's native renderer and return the image plus metadata.",
+    inputSchema: z.object({
+      nodeId: z.string().min(1),
+      format: z.enum(["PNG", "JPG"]).default("PNG"),
+      scale: z.number().min(0.01).max(4).default(1),
+    }),
+    annotations: { readOnlyHint: true, destructiveHint: false },
+  },
+  async (input) => {
+    try {
+      return imageToolResult(await sendCommand("export_node", input));
+    } catch (error) {
+      return toolError(error);
+    }
+  },
+);
+
+mcp.registerTool(
+  "figma_get_image",
+  {
+    description:
+      "Read the original encoded image bytes for a Figma image fill by imageHash.",
+    inputSchema: z.object({ imageHash: z.string().min(1) }),
+    annotations: { readOnlyHint: true, destructiveHint: false },
+  },
+  async (input) => {
+    try {
+      return imageToolResult(await sendCommand("get_image", input));
+    } catch (error) {
+      return toolError(error);
+    }
+  },
+);
 
 const transport = new StdioServerTransport();
 await mcp.connect(transport);
-
-function shutdown() {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  for (const pending of pendingCommands.values()) {
-    clearTimeout(pending.timer);
-    pending.reject(new Error("Bridge server stopped."));
-  }
-  pendingCommands.clear();
-  if (!bridgeHttpServer.listening) {
-    process.exit();
-    return;
-  }
-  bridgeHttpServer.close(() => process.exit());
-}
-
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
-process.stdin.on("end", shutdown);

@@ -1,6 +1,6 @@
 figma.showUI(__html__, {
-  width: 420,
-  height: 590,
+  width: 280,
+  height: 52,
   themeColors: true,
 });
 
@@ -16,6 +16,11 @@ const TEXT_SEGMENT_FIELDS = [
   "textStyleId",
   "fillStyleId",
 ];
+const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
+const EXPORT_MIME_TYPES = {
+  PNG: "image/png",
+  JPG: "image/jpeg",
+};
 
 function jsonValue(value, seen) {
   if (value === figma.mixed || typeof value === "symbol") return "MIXED";
@@ -246,6 +251,133 @@ function normalizeOptions(input) {
   };
 }
 
+function encodeImageResult(bytes, metadata) {
+  if (!(bytes instanceof Uint8Array)) {
+    throw new Error("Figma returned invalid image data.");
+  }
+  if (bytes.length > MAX_IMAGE_BYTES) {
+    throw new Error(
+      `Image is too large to transfer (${bytes.length} bytes; maximum ${MAX_IMAGE_BYTES} bytes).`,
+    );
+  }
+  return {
+    schemaVersion: "1.0.0",
+    ...metadata,
+    byteLength: bytes.length,
+    base64: figma.base64Encode(bytes),
+  };
+}
+
+function normalizeExportFormat(value) {
+  const format = String(value || "PNG").toUpperCase();
+  if (!(format in EXPORT_MIME_TYPES)) {
+    throw new Error(`Unsupported export format: ${format}. Use PNG or JPG.`);
+  }
+  return format;
+}
+
+function normalizeExportScale(value) {
+  const scale = value === undefined ? 1 : Number(value);
+  if (!Number.isFinite(scale) || scale < 0.01 || scale > 4) {
+    throw new Error("Export scale must be between 0.01 and 4.");
+  }
+  return scale;
+}
+
+function detectImageMimeType(bytes) {
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return "image/png";
+  }
+  if (
+    bytes.length >= 3 &&
+    bytes[0] === 0xff &&
+    bytes[1] === 0xd8 &&
+    bytes[2] === 0xff
+  ) {
+    return "image/jpeg";
+  }
+  if (
+    bytes.length >= 6 &&
+    bytes[0] === 0x47 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x38 &&
+    (bytes[4] === 0x37 || bytes[4] === 0x39) &&
+    bytes[5] === 0x61
+  ) {
+    return "image/gif";
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  throw new Error("Unsupported or unrecognized image format.");
+}
+
+async function exportNodeImage(input) {
+  const node = await figma.getNodeByIdAsync(input.nodeId);
+  if (!node) throw new Error(`Node not found: ${input.nodeId}`);
+  if (typeof node.exportAsync !== "function") {
+    throw new Error(`Node cannot be exported: ${input.nodeId} (${node.type})`);
+  }
+
+  const format = normalizeExportFormat(input.format);
+  const scale = normalizeExportScale(input.scale);
+  const bytes = await node.exportAsync({
+    format,
+    constraint: { type: "SCALE", value: scale },
+  });
+  const sourceSize =
+    typeof node.width === "number" && typeof node.height === "number"
+      ? { width: node.width, height: node.height }
+      : null;
+  return encodeImageResult(bytes, {
+    kind: "node-render",
+    node: { id: node.id, name: node.name, type: node.type },
+    format,
+    scale,
+    mimeType: EXPORT_MIME_TYPES[format],
+    sourceSize,
+  });
+}
+
+async function getOriginalImage(input) {
+  const imageHash = String(input.imageHash || "").trim();
+  if (!imageHash) throw new Error("An imageHash is required.");
+  const image = figma.getImageByHash(imageHash);
+  if (!image) throw new Error(`Image not found: ${imageHash}`);
+  const [bytes, size] = await Promise.all([
+    image.getBytesAsync(),
+    image.getSizeAsync(),
+  ]);
+  return encodeImageResult(bytes, {
+    kind: "original-image",
+    imageHash,
+    mimeType: detectImageMimeType(bytes),
+    width: size.width,
+    height: size.height,
+  });
+}
+
 async function exportNodes(nodes, input) {
   const options = normalizeOptions(input || {});
   const state = { count: 0, truncated: false };
@@ -332,6 +464,10 @@ async function executeCommand(command) {
       return listPages();
     case "get_variables":
       return getVariables();
+    case "export_node":
+      return exportNodeImage(command.input);
+    case "get_image":
+      return getOriginalImage(command.input);
     default:
       throw new Error(`Unsupported bridge action: ${command.action}`);
   }
@@ -339,18 +475,6 @@ async function executeCommand(command) {
 
 figma.ui.onmessage = async (message) => {
   if (!message) return;
-  if (message.type === "bridge-settings-get") {
-    const settings = await figma.clientStorage.getAsync("bridgeSettings");
-    figma.ui.postMessage({
-      type: "bridge-settings",
-      settings: settings || {},
-    });
-    return;
-  }
-  if (message.type === "bridge-settings-set") {
-    await figma.clientStorage.setAsync("bridgeSettings", message.settings || {});
-    return;
-  }
   if (message.type !== "bridge-command") return;
   try {
     const data = await executeCommand(message.command);

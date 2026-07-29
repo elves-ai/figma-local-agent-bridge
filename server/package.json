@@ -1,14 +1,15 @@
 {
   "name": "figma-local-agent-bridge",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "Local read-only MCP bridge for the Figma Plugin API",
   "main": "server.mjs",
   "scripts": {
-    "start": "node server.mjs",
-    "check": "node --check server.mjs",
-    "test": "node smoke-test.mjs"
+    "start": "node bridge.mjs",
+    "mcp": "node server.mjs",
+    "check": "node --check bridge.mjs && node --check server.mjs && node --check ../plugin/code.js",
+    "test": "node plugin-test.mjs && node smoke-test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

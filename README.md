@@ -8,20 +8,25 @@
 - 按节点 ID 读取节点。
 - 列出页面。
 - 读取本地变量集合。
+- 使用 Figma 原生渲染器按节点导出 PNG/JPG。
+- 按 `imageHash` 提取图片填充中的原始 PNG/JPEG/GIF/WebP。
 - 让任何支持 MCP stdio 的 Agent 调用，包括 Codex、Claude Code 和 Cursor。
 
-当前版本刻意保持只读：Agent 不能执行任意 JavaScript，也不能修改或删除设计节点。
+当前版本刻意保持只读：Agent 不能执行任意 JavaScript，也不能修改或删除设计节点。图片导出只读取并传输现有内容。
 
-## 一、安装依赖
+## 一、安装依赖并启动 bridge
 
 ```bash
 cd /home/yangzhe/work/figma-local-agent-bridge/server
 npm install
+npm start
 ```
 
 需要 Node.js 20 或更高版本。
 
 MCP 服务和依赖应位于同一个原生文件系统中。Windows Node 直接从 WSL 的 UNC 路径加载大量 npm 模块可能很慢；这种情况下请在 WSL 内安装 Node，或把 `server/` 复制到 Windows 本地目录后运行 `npm install`。
+
+`npm start` 会在当前终端前台运行独立的 HTTP bridge。保持该终端打开；需要停止服务时按 `Ctrl+C`。
 
 ## 二、在 Figma 中安装本地插件
 
@@ -76,13 +81,14 @@ claude mcp add figma-local -- node /absolute/path/figma-local-agent-bridge/serve
 
 ## 四、连接插件
 
-1. 重启或刷新 Agent 的 MCP 服务。
-2. 打开插件后，它会自动连接；如果 MCP 服务尚未启动或连接短暂中断，插件会持续重试。
-3. 让 Agent 调用 `figma_bridge_status`，应看到 `connected: true`。
+1. 在 `server/` 目录运行 `npm start`，确认终端显示 bridge 正在监听 `127.0.0.1:3846`。
+2. 打开 Figma 插件。插件初始状态为“未连接”，不会自动发起连接。
+3. 点击“连接”；插件固定连接 `http://localhost:3846`。
+4. 让 Agent 调用 `figma_bridge_status`，应看到 `serviceRunning: true` 和 `connected: true`。
 
-连接偏好会保存在 Figma 本地：默认自动连接；用户点击“断开”后，即使重新打开插件也会保持断开，直到再次点击“连接”。
+插件只会在点击“连接”后建立连接。点击“断开”或网络中断后，它会保持未连接并展示状态，不会自动重连；需要时再次手动点击“连接”。
 
-Codex 会根据 `[mcp_servers.figmaLocal]` 配置，在启动任务时自动拉起 MCP 进程，并在任务结束时关闭它，无需单独运行 `npm start`。
+Codex 会根据 `[mcp_servers.figmaLocal]` 配置为每个任务拉起短生命周期的 MCP stdio 适配器。HTTP bridge 则由 `npm start` 在单独终端中前台运行，两者生命周期互不影响。
 
 随后 Agent 可以调用：
 
@@ -90,10 +96,24 @@ Codex 会根据 `[mcp_servers.figmaLocal]` 配置，在启动任务时自动拉�
 - `figma_get_node`
 - `figma_list_pages`
 - `figma_get_local_variables`
+- `figma_export_node`
+- `figma_get_image`
+
+## 图片导出
+
+`figma_export_node` 使用 Figma 原生渲染器导出节点的最终画面，包含裁剪、蒙层、圆角、文字和效果。参数：
+
+- `nodeId`：必填，Figma 节点 ID。
+- `format`：`PNG`（默认）或 `JPG`。
+- `scale`：默认 `1`，范围 `0.01..4`。例如 266 × 266 的节点按 `scale: 1` 导出为 1× 像素结果，按 `scale: 2` 导出为 2×。
+
+`figma_get_image` 按 `imageHash` 返回图片填充中存储的原始编码文件和原始像素尺寸。它不会应用节点上的裁剪、旋转、滤镜、蒙层或混合效果。
+
+两个工具都返回一段 JSON 元数据和一个 MCP 图片内容块。为了避免 Base64 传输超过本地 HTTP bridge 的请求上限，单张图片的原始编码数据最多为 16 MiB。
 
 ## 多 Agent 使用
 
-每个 Agent 都可以配置此 MCP 服务。由于插件固定连接 `localhost:3846`，同一时间只运行一个 Agent 的桥接实例；切换 Agent 时关闭前一个实例，再启动另一个即可。
+每个 Agent 都可以配置同一个 `server.mjs`。所有 MCP 适配器共享本机 `localhost:3846` 上的前台 bridge，不再互相争抢监听端口。Figma 插件仍一次只连接一个 bridge，来自多个 Agent 的只读命令会进入同一队列。
 
 ## 安全模型
 
@@ -101,6 +121,7 @@ Codex 会根据 `[mcp_servers.figmaLocal]` 配置，在启动任务时自动拉�
 - 校验 `Host` 头，降低 DNS rebinding 风险。
 - Agent 只能调用白名单只读命令。
 - 单次请求最多读取 10,000 个节点，默认 2,000 个。
+- 单张导出图片最多 16 MiB，节点导出缩放范围为 `0.01..4`。
 - 插件只允许访问 `http://localhost:3846`。
 
 设计文件内容会发送给本机已连接的 Agent，因此仅应连接你信任的 Agent。
