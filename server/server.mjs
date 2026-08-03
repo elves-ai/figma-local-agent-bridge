@@ -6,7 +6,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 const BRIDGE_URL = (
-  process.env.FIGMA_BRIDGE_URL || "http://localhost:3846"
+  process.env.FIGMA_BRIDGE_URL || "http://localhost:13846"
 ).replace(/\/$/, "");
 const COMMAND_TIMEOUT_MS = Number(process.env.FIGMA_BRIDGE_TIMEOUT_MS || 30000);
 

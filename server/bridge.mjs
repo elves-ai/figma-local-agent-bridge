@@ -5,7 +5,7 @@ import http from "node:http";
 import process from "node:process";
 
 const HOST = process.env.FIGMA_BRIDGE_HOST || "127.0.0.1";
-const PORT = Number(process.env.FIGMA_BRIDGE_PORT || 3846);
+const PORT = Number(process.env.FIGMA_BRIDGE_PORT || 13846);
 const COMMAND_TIMEOUT_MS = Number(process.env.FIGMA_BRIDGE_TIMEOUT_MS || 30000);
 const MAX_BODY_BYTES = 25 * 1024 * 1024;
 const SERVICE_NAME = "figma-local-agent-bridge";

@@ -81,9 +81,9 @@ claude mcp add figma-local -- node /absolute/path/figma-local-agent-bridge/serve
 
 ## 四、连接插件
 
-1. 在 `server/` 目录运行 `npm start`，确认终端显示 bridge 正在监听 `127.0.0.1:3846`。
+1. 在 `server/` 目录运行 `npm start`，确认终端显示 bridge 正在监听 `127.0.0.1:13846`。
 2. 打开 Figma 插件。插件初始状态为“未连接”，不会自动发起连接。
-3. 点击“连接”；插件固定连接 `http://localhost:3846`。
+3. 点击“连接”；插件固定连接 `http://localhost:13846`。
 4. 让 Agent 调用 `figma_bridge_status`，应看到 `serviceRunning: true` 和 `connected: true`。
 
 插件只会在点击“连接”后建立连接。点击“断开”或网络中断后，它会保持未连接并展示状态，不会自动重连；需要时再次手动点击“连接”。
@@ -113,7 +113,7 @@ Codex 会根据 `[mcp_servers.figmaLocal]` 配置为每个任务拉起短生命�
 
 ## 多 Agent 使用
 
-每个 Agent 都可以配置同一个 `server.mjs`。所有 MCP 适配器共享本机 `localhost:3846` 上的前台 bridge，不再互相争抢监听端口。Figma 插件仍一次只连接一个 bridge，来自多个 Agent 的只读命令会进入同一队列。
+每个 Agent 都可以配置同一个 `server.mjs`。所有 MCP 适配器共享本机 `localhost:13846` 上的前台 bridge，不再互相争抢监听端口。Figma 插件仍一次只连接一个 bridge，来自多个 Agent 的只读命令会进入同一队列。
 
 ## 安全模型
 
@@ -122,6 +122,6 @@ Codex 会根据 `[mcp_servers.figmaLocal]` 配置为每个任务拉起短生命�
 - Agent 只能调用白名单只读命令。
 - 单次请求最多读取 10,000 个节点，默认 2,000 个。
 - 单张导出图片最多 16 MiB，节点导出缩放范围为 `0.01..4`。
-- 插件只允许访问 `http://localhost:3846`。
+- 插件只允许访问 `http://localhost:13846`。
 
 设计文件内容会发送给本机已连接的 Agent，因此仅应连接你信任的 Agent。
