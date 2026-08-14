@@ -82,9 +82,13 @@
       };
 
       const clientId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000];
       let connectionState = "disconnected";
       let polling = false;
       let connectionGeneration = 0;
+      let wantsConnection = false;
+      let reconnectAttempts = 0;
+      let nextReconnectAt = 0;
       let context = { fileName: "", pageName: "", selection: [] };
 
       function setConnectionState(value, label) {
@@ -93,8 +97,12 @@
           disconnected: "未连接",
           connecting: "连接中",
           connected: "已连接",
+          reconnecting: "重连中",
         }[value];
-        elements.dot.classList.toggle("connecting", value === "connecting");
+        elements.dot.classList.toggle(
+          "connecting",
+          value === "connecting" || value === "reconnecting",
+        );
         elements.dot.classList.toggle("connected", value === "connected");
         elements.connect.disabled = value !== "disconnected";
         elements.disconnect.disabled = value === "disconnected";
@@ -125,12 +133,35 @@
         }
       }
 
+      function scheduleReconnect() {
+        if (!wantsConnection) return;
+        const delay = RECONNECT_DELAYS_MS[
+          Math.min(reconnectAttempts, RECONNECT_DELAYS_MS.length - 1)
+        ];
+        reconnectAttempts += 1;
+        nextReconnectAt = Date.now() + delay;
+        setConnectionState(
+          "reconnecting",
+          `连接中断，${Math.ceil(delay / 1000)} 秒后重试`,
+        );
+      }
+
+      function markConnected() {
+        reconnectAttempts = 0;
+        nextReconnectAt = 0;
+        setConnectionState("connected");
+      }
+
       async function poll() {
-        if (connectionState !== "connected" || polling) return;
+        if (!wantsConnection || polling || Date.now() < nextReconnectAt) return;
+        const generation = connectionGeneration;
         polling = true;
         try {
           await heartbeat();
+          if (!wantsConnection || generation !== connectionGeneration) return;
+          markConnected();
           const response = await fetch(endpoint("/v1/commands/next"));
+          if (!wantsConnection || generation !== connectionGeneration) return;
           if (response.status === 200) {
             const command = await response.json();
             parent.postMessage(
@@ -141,28 +172,26 @@
             throw new Error(`Poll HTTP ${response.status}`);
           }
         } catch (_error) {
-          connectionGeneration += 1;
-          setConnectionState("disconnected", "连接断开");
+          if (wantsConnection && generation === connectionGeneration) {
+            scheduleReconnect();
+          }
         } finally {
           polling = false;
         }
       }
 
       async function connect() {
-        if (connectionState !== "disconnected") return;
-        const generation = ++connectionGeneration;
+        if (wantsConnection) return;
+        wantsConnection = true;
+        connectionGeneration += 1;
+        reconnectAttempts = 0;
+        nextReconnectAt = 0;
         setConnectionState("connecting");
-        try {
-          await heartbeat();
-          if (generation !== connectionGeneration) return;
-          setConnectionState("connected");
-        } catch (_error) {
-          if (generation !== connectionGeneration) return;
-          setConnectionState("disconnected", "连接失败");
-        }
+        await poll();
       }
 
       async function submitResult(message) {
+        const generation = connectionGeneration;
         try {
           const response = await fetch(
             endpoint(`/v1/commands/${encodeURIComponent(message.commandId)}/result`),
@@ -178,8 +207,9 @@
           );
           if (!response.ok) throw new Error(`Result HTTP ${response.status}`);
         } catch (_error) {
-          connectionGeneration += 1;
-          setConnectionState("disconnected", "连接断开");
+          if (wantsConnection && generation === connectionGeneration) {
+            scheduleReconnect();
+          }
         }
       }
 
@@ -195,8 +225,11 @@
 
       elements.connect.onclick = connect;
       elements.disconnect.onclick = async () => {
-        if (connectionState === "disconnected") return;
+        if (!wantsConnection) return;
+        wantsConnection = false;
         connectionGeneration += 1;
+        reconnectAttempts = 0;
+        nextReconnectAt = 0;
         setConnectionState("disconnected");
         await notifyDisconnect();
       };

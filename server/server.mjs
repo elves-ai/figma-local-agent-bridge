@@ -44,6 +44,12 @@ async function bridgeStatus() {
       serviceRunning: true,
       connected: status.pluginConnected === true,
       bridgeUrl: BRIDGE_URL,
+      heartbeatAgeMs: Number.isFinite(status.heartbeatAgeMs)
+        ? status.heartbeatAgeMs
+        : null,
+      staleAfterMs: Number.isFinite(status.staleAfterMs)
+        ? status.staleAfterMs
+        : null,
       fileName: status.fileName || null,
       pageName: status.pageName || null,
       selection: Array.isArray(status.selection) ? status.selection : [],
@@ -53,6 +59,8 @@ async function bridgeStatus() {
       serviceRunning: false,
       connected: false,
       bridgeUrl: BRIDGE_URL,
+      heartbeatAgeMs: null,
+      staleAfterMs: null,
       fileName: null,
       pageName: null,
       selection: [],
@@ -164,7 +172,7 @@ const traversalSchema = {
 };
 
 const mcp = new McpServer(
-  { name: "figma-local-agent-bridge", version: "1.3.0" },
+  { name: "figma-local-agent-bridge", version: "1.3.1" },
   {
     instructions:
       "This server reads and exports from the Figma file connected to the local foreground bridge. Call figma_bridge_status first. All tools are read-only.",

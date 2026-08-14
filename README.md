@@ -86,7 +86,15 @@ claude mcp add figma-local -- node /absolute/path/figma-local-agent-bridge/serve
 3. 点击“连接”；插件固定连接 `http://localhost:13846`。
 4. 让 Agent 调用 `figma_bridge_status`，应看到 `serviceRunning: true` 和 `connected: true`。
 
-插件只会在点击“连接”后建立连接。点击“断开”或网络中断后，它会保持未连接并展示状态，不会自动重连；需要时再次手动点击“连接”。
+插件只会在点击“连接”后建立连接。连接期间如果出现短暂网络错误，插件会按 1、2、5、10 秒的退避间隔持续重连；点击“断开”后才会停止重连。
+
+bridge 默认允许心跳中断 30 秒，避免 Figma 切到后台或系统短暂卡顿时误报断开。可通过 `FIGMA_PLUGIN_STALE_AFTER_MS` 调整该阈值，例如：
+
+```bash
+FIGMA_PLUGIN_STALE_AFTER_MS=45000 npm start
+```
+
+`figma_bridge_status` 会返回 `heartbeatAgeMs` 和 `staleAfterMs`，用于区分真正断开与心跳延迟。
 
 Codex 会根据 `[mcp_servers.figmaLocal]` 配置为每个任务拉起短生命周期的 MCP stdio 适配器。HTTP bridge 则由 `npm start` 在单独终端中前台运行，两者生命周期互不影响。
 

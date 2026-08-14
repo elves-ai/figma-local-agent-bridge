@@ -7,14 +7,23 @@ import process from "node:process";
 const HOST = process.env.FIGMA_BRIDGE_HOST || "127.0.0.1";
 const PORT = Number(process.env.FIGMA_BRIDGE_PORT || 13846);
 const COMMAND_TIMEOUT_MS = Number(process.env.FIGMA_BRIDGE_TIMEOUT_MS || 30000);
+const PLUGIN_STALE_AFTER_MS = positiveDuration(
+  process.env.FIGMA_PLUGIN_STALE_AFTER_MS,
+  30000,
+);
 const MAX_BODY_BYTES = 25 * 1024 * 1024;
 const SERVICE_NAME = "figma-local-agent-bridge";
-const SERVICE_VERSION = "1.3.0";
+const SERVICE_VERSION = "1.3.1";
 
 const queuedCommands = [];
 const pendingCommands = new Map();
 let pluginState = emptyPluginState();
 let shuttingDown = false;
+
+function positiveDuration(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 function emptyPluginState() {
   return {
@@ -30,8 +39,15 @@ function log(message) {
   process.stderr.write(`[figma-local-bridge] ${message}\n`);
 }
 
-function pluginConnected() {
-  return Date.now() - pluginState.lastSeen < 6000;
+function pluginHeartbeatAgeMs(now = Date.now()) {
+  return pluginState.lastSeen > 0
+    ? Math.max(0, now - pluginState.lastSeen)
+    : null;
+}
+
+function pluginConnected(now = Date.now()) {
+  const heartbeatAgeMs = pluginHeartbeatAgeMs(now);
+  return heartbeatAgeMs !== null && heartbeatAgeMs < PLUGIN_STALE_AFTER_MS;
 }
 
 function removeQueuedCommand(commandId) {
@@ -110,12 +126,15 @@ function readJson(request) {
 }
 
 function statusPayload() {
-  const connected = pluginConnected();
+  const now = Date.now();
+  const connected = pluginConnected(now);
   return {
     ok: true,
     service: SERVICE_NAME,
     version: SERVICE_VERSION,
     pluginConnected: connected,
+    heartbeatAgeMs: pluginHeartbeatAgeMs(now),
+    staleAfterMs: PLUGIN_STALE_AFTER_MS,
     fileName: connected ? pluginState.fileName : null,
     pageName: connected ? pluginState.pageName : null,
     selection: connected ? pluginState.selection : [],

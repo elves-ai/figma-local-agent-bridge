@@ -59,6 +59,7 @@ const daemon = spawn(
       ...process.env,
       FIGMA_BRIDGE_PORT: String(port),
       FIGMA_BRIDGE_TIMEOUT_MS: "3000",
+      FIGMA_PLUGIN_STALE_AFTER_MS: "30000",
     },
     stdio: ["ignore", "pipe", "pipe"],
   },
@@ -107,13 +108,18 @@ try {
   assert.equal(status.serviceRunning, true);
   assert.equal(status.connected, false);
   assert.equal(status.bridgeUrl, bridgeUrl);
+  assert.equal(status.heartbeatAgeMs, null);
+  assert.equal(status.staleAfterMs, 30000);
 
   const healthResponse = await fetch(`${bridgeUrl}/health`);
   assert.equal(healthResponse.status, 200);
   const initialHealth = await healthResponse.json();
   assert.equal(initialHealth.ok, true);
   assert.equal(initialHealth.service, "figma-local-agent-bridge");
+  assert.equal(initialHealth.version, "1.3.1");
   assert.equal(initialHealth.pluginConnected, false);
+  assert.equal(initialHealth.heartbeatAgeMs, null);
+  assert.equal(initialHealth.staleAfterMs, 30000);
 
   const heartbeatResponse = await fetch(
     `${bridgeUrl}/v1/plugin/heartbeat`,
@@ -134,7 +140,11 @@ try {
     name: "figma_bridge_status",
     arguments: {},
   });
-  assert.equal(JSON.parse(connectedStatus.content[0].text).connected, true);
+  const connectedStatusBody = JSON.parse(connectedStatus.content[0].text);
+  assert.equal(connectedStatusBody.connected, true);
+  assert.equal(connectedStatusBody.staleAfterMs, 30000);
+  assert.equal(connectedStatusBody.heartbeatAgeMs >= 0, true);
+  assert.equal(connectedStatusBody.heartbeatAgeMs < 30000, true);
 
   const listPagesPromise = client.callTool({
     name: "figma_list_pages",
