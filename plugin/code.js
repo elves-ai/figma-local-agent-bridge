@@ -16,10 +16,11 @@ const TEXT_SEGMENT_FIELDS = [
   "textStyleId",
   "fillStyleId",
 ];
-const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
+const MAX_ASSET_BYTES = 16 * 1024 * 1024;
 const EXPORT_MIME_TYPES = {
   PNG: "image/png",
   JPG: "image/jpeg",
+  SVG: "image/svg+xml",
 };
 
 function jsonValue(value, seen) {
@@ -251,13 +252,13 @@ function normalizeOptions(input) {
   };
 }
 
-function encodeImageResult(bytes, metadata) {
+function encodeAssetResult(bytes, metadata) {
   if (!(bytes instanceof Uint8Array)) {
-    throw new Error("Figma returned invalid image data.");
+    throw new Error("Figma returned invalid asset data.");
   }
-  if (bytes.length > MAX_IMAGE_BYTES) {
+  if (bytes.length > MAX_ASSET_BYTES) {
     throw new Error(
-      `Image is too large to transfer (${bytes.length} bytes; maximum ${MAX_IMAGE_BYTES} bytes).`,
+      `Asset is too large to transfer (${bytes.length} bytes; maximum ${MAX_ASSET_BYTES} bytes).`,
     );
   }
   return {
@@ -271,7 +272,7 @@ function encodeImageResult(bytes, metadata) {
 function normalizeExportFormat(value) {
   const format = String(value || "PNG").toUpperCase();
   if (!(format in EXPORT_MIME_TYPES)) {
-    throw new Error(`Unsupported export format: ${format}. Use PNG or JPG.`);
+    throw new Error(`Unsupported export format: ${format}. Use PNG, JPG, or SVG.`);
   }
   return format;
 }
@@ -282,6 +283,14 @@ function normalizeExportScale(value) {
     throw new Error("Export scale must be between 0.01 and 4.");
   }
   return scale;
+}
+
+function normalizeBooleanOption(value, defaultValue, name) {
+  if (value === undefined) return defaultValue;
+  if (typeof value !== "boolean") {
+    throw new Error(`${name} must be a boolean.`);
+  }
+  return value;
 }
 
 function detectImageMimeType(bytes) {
@@ -341,20 +350,45 @@ async function exportNodeImage(input) {
   }
 
   const format = normalizeExportFormat(input.format);
-  const scale = normalizeExportScale(input.scale);
-  const bytes = await node.exportAsync({
-    format,
-    constraint: { type: "SCALE", value: scale },
-  });
+  let bytes;
+  let exportMetadata;
+  if (format === "SVG") {
+    const svgOptions = {
+      svgOutlineText: normalizeBooleanOption(
+        input.svgOutlineText,
+        true,
+        "svgOutlineText",
+      ),
+      svgIdAttribute: normalizeBooleanOption(
+        input.svgIdAttribute,
+        false,
+        "svgIdAttribute",
+      ),
+      svgSimplifyStroke: normalizeBooleanOption(
+        input.svgSimplifyStroke,
+        true,
+        "svgSimplifyStroke",
+      ),
+    };
+    bytes = await node.exportAsync({ format, ...svgOptions });
+    exportMetadata = { svgOptions };
+  } else {
+    const scale = normalizeExportScale(input.scale);
+    bytes = await node.exportAsync({
+      format,
+      constraint: { type: "SCALE", value: scale },
+    });
+    exportMetadata = { scale };
+  }
   const sourceSize =
     typeof node.width === "number" && typeof node.height === "number"
       ? { width: node.width, height: node.height }
       : null;
-  return encodeImageResult(bytes, {
+  return encodeAssetResult(bytes, {
     kind: "node-render",
     node: { id: node.id, name: node.name, type: node.type },
     format,
-    scale,
+    ...exportMetadata,
     mimeType: EXPORT_MIME_TYPES[format],
     sourceSize,
   });
@@ -369,7 +403,7 @@ async function getOriginalImage(input) {
     image.getBytesAsync(),
     image.getSizeAsync(),
   ]);
-  return encodeImageResult(bytes, {
+  return encodeAssetResult(bytes, {
     kind: "original-image",
     imageHash,
     mimeType: detectImageMimeType(bytes),

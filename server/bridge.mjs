@@ -9,7 +9,7 @@ const PORT = Number(process.env.FIGMA_BRIDGE_PORT || 13846);
 const COMMAND_TIMEOUT_MS = Number(process.env.FIGMA_BRIDGE_TIMEOUT_MS || 30000);
 const MAX_BODY_BYTES = 25 * 1024 * 1024;
 const SERVICE_NAME = "figma-local-agent-bridge";
-const SERVICE_VERSION = "1.2.0";
+const SERVICE_VERSION = "1.3.0";
 
 const queuedCommands = [];
 const pendingCommands = new Map();

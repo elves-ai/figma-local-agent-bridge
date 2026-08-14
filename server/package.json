@@ -1,6 +1,6 @@
 {
   "name": "figma-local-agent-bridge",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
   "type": "module",
   "description": "Local read-only MCP bridge for the Figma Plugin API",

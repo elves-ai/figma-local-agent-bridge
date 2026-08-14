@@ -8,6 +8,9 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const ONE_PIXEL_PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlC6ZkAAAAASUVORK5CYII=";
+const SVG_SOURCE =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 12h16"/></svg>';
+const SVG_BASE64 = Buffer.from(SVG_SOURCE, "utf8").toString("base64");
 
 async function getFreePort() {
   const probe = net.createServer();
@@ -68,7 +71,7 @@ daemon.stderr.on("data", (chunk) => {
   daemonLogs += chunk;
 });
 
-const client = new Client({ name: "figma-bridge-smoke-test", version: "1.2.0" });
+const client = new Client({ name: "figma-bridge-smoke-test", version: "1.3.0" });
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: [fileURLToPath(new URL("./server.mjs", import.meta.url))],
@@ -200,6 +203,64 @@ try {
   assert.equal(
     JSON.parse(exportNodeResult.content[0].text).kind,
     "node-render",
+  );
+
+  const exportSvgPromise = client.callTool({
+    name: "figma_export_node",
+    arguments: {
+      nodeId: "1:2",
+      format: "SVG",
+      svgOutlineText: false,
+      svgIdAttribute: true,
+      svgSimplifyStroke: false,
+    },
+  });
+  const exportSvgCommand = await waitForCommand(bridgeUrl);
+  assert.equal(exportSvgCommand.action, "export_node");
+  assert.deepEqual(exportSvgCommand.input, {
+    nodeId: "1:2",
+    format: "SVG",
+    scale: 1,
+    svgOutlineText: false,
+    svgIdAttribute: true,
+    svgSimplifyStroke: false,
+  });
+  const exportSvgResponse = await fetch(
+    `${bridgeUrl}/v1/commands/${encodeURIComponent(exportSvgCommand.id)}/result`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ok: true,
+        data: {
+          schemaVersion: "1.0.0",
+          kind: "node-render",
+          node: { id: "1:2", name: "Icon", type: "VECTOR" },
+          format: "SVG",
+          svgOptions: {
+            svgOutlineText: false,
+            svgIdAttribute: true,
+            svgSimplifyStroke: false,
+          },
+          mimeType: "image/svg+xml",
+          sourceSize: { width: 24, height: 24 },
+          byteLength: Buffer.byteLength(SVG_SOURCE, "utf8"),
+          base64: SVG_BASE64,
+        },
+      }),
+    },
+  );
+  assert.equal(exportSvgResponse.status, 200);
+  const exportSvgResult = await exportSvgPromise;
+  assert.equal(exportSvgResult.isError, undefined);
+  assert.equal(exportSvgResult.content[0].type, "text");
+  assert.equal(exportSvgResult.content[1].type, "resource");
+  assert.equal(exportSvgResult.content[1].resource.uri, "figma://node/1%3A2.svg");
+  assert.equal(exportSvgResult.content[1].resource.mimeType, "image/svg+xml");
+  assert.equal(exportSvgResult.content[1].resource.text, SVG_SOURCE);
+  assert.equal(
+    JSON.parse(exportSvgResult.content[0].text).format,
+    "SVG",
   );
 
   const getImagePromise = client.callTool({

@@ -104,6 +104,46 @@ function imageToolResult(value) {
   };
 }
 
+function exportToolResult(value) {
+  if (!value.ok) return toolResult(value);
+  const data = value.data || {};
+  if (data.format !== "SVG") return imageToolResult(value);
+  if (
+    typeof data.base64 !== "string" ||
+    !data.base64 ||
+    data.mimeType !== "image/svg+xml"
+  ) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: "Figma plugin returned invalid SVG data." }],
+    };
+  }
+
+  const bytes = Buffer.from(data.base64, "base64");
+  if (bytes.length === 0 || bytes.length !== data.byteLength) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: "Figma plugin returned invalid SVG data." }],
+    };
+  }
+
+  const { base64, ...metadata } = data;
+  const nodeId = encodeURIComponent(data.node?.id || "export");
+  return {
+    content: [
+      { type: "text", text: JSON.stringify(metadata, null, 2) },
+      {
+        type: "resource",
+        resource: {
+          uri: `figma://node/${nodeId}.svg`,
+          mimeType: "image/svg+xml",
+          text: bytes.toString("utf8"),
+        },
+      },
+    ],
+  };
+}
+
 function toolError(error) {
   return {
     isError: true,
@@ -124,7 +164,7 @@ const traversalSchema = {
 };
 
 const mcp = new McpServer(
-  { name: "figma-local-agent-bridge", version: "1.2.0" },
+  { name: "figma-local-agent-bridge", version: "1.3.0" },
   {
     instructions:
       "This server reads and exports from the Figma file connected to the local foreground bridge. Call figma_bridge_status first. All tools are read-only.",
@@ -217,17 +257,34 @@ mcp.registerTool(
   "figma_export_node",
   {
     description:
-      "Export a Figma node with Figma's native renderer and return the image plus metadata.",
+      "Export a Figma node with Figma's native renderer. PNG/JPG return an image; SVG returns the exact SVG source as an embedded resource.",
     inputSchema: z.object({
       nodeId: z.string().min(1),
-      format: z.enum(["PNG", "JPG"]).default("PNG"),
-      scale: z.number().min(0.01).max(4).default(1),
+      format: z.enum(["PNG", "JPG", "SVG"]).default("PNG"),
+      scale: z
+        .number()
+        .min(0.01)
+        .max(4)
+        .default(1)
+        .describe("PNG/JPG export scale. Ignored for SVG."),
+      svgOutlineText: z
+        .boolean()
+        .optional()
+        .describe("SVG only: convert text to vector outlines. Defaults to true."),
+      svgIdAttribute: z
+        .boolean()
+        .optional()
+        .describe("SVG only: include layer names as id attributes. Defaults to false."),
+      svgSimplifyStroke: z
+        .boolean()
+        .optional()
+        .describe("SVG only: simplify inside/outside strokes. Defaults to true."),
     }),
     annotations: { readOnlyHint: true, destructiveHint: false },
   },
   async (input) => {
     try {
-      return imageToolResult(await sendCommand("export_node", input));
+      return exportToolResult(await sendCommand("export_node", input));
     } catch (error) {
       return toolError(error);
     }

@@ -8,7 +8,7 @@
 - 按节点 ID 读取节点。
 - 列出页面。
 - 读取本地变量集合。
-- 使用 Figma 原生渲染器按节点导出 PNG/JPG。
+- 使用 Figma 原生渲染器按节点导出 PNG/JPG/SVG。
 - 按 `imageHash` 提取图片填充中的原始 PNG/JPEG/GIF/WebP。
 - 让任何支持 MCP stdio 的 Agent 调用，包括 Codex、Claude Code 和 Cursor。
 
@@ -101,15 +101,20 @@ Codex 会根据 `[mcp_servers.figmaLocal]` 配置为每个任务拉起短生命�
 
 ## 图片导出
 
-`figma_export_node` 使用 Figma 原生渲染器导出节点的最终画面，包含裁剪、蒙层、圆角、文字和效果。参数：
+`figma_export_node` 使用 Figma 原生渲染器导出节点。参数：
 
 - `nodeId`：必填，Figma 节点 ID。
-- `format`：`PNG`（默认）或 `JPG`。
-- `scale`：默认 `1`，范围 `0.01..4`。例如 266 × 266 的节点按 `scale: 1` 导出为 1× 像素结果，按 `scale: 2` 导出为 2×。
+- `format`：`PNG`（默认）、`JPG` 或 `SVG`。
+- `scale`：仅用于 PNG/JPG，默认 `1`，范围 `0.01..4`。例如 266 × 266 的节点按 `scale: 1` 导出为 1× 像素结果，按 `scale: 2` 导出为 2×。
+- `svgOutlineText`：仅用于 SVG，是否将文字转为矢量轮廓，默认 `true`。
+- `svgIdAttribute`：仅用于 SVG，是否使用图层名称生成 `id` 属性，默认 `false`。
+- `svgSimplifyStroke`：仅用于 SVG，是否简化内描边和外描边，默认 `true`。
+
+PNG/JPG 返回 JSON 元数据和 MCP 图片内容块；SVG 返回 JSON 元数据和一个 MIME 类型为 `image/svg+xml` 的嵌入文本资源，Agent 可以读取源码并按需保存成 `.svg` 文件。SVG 导出不会使用 `scale`，并保留 Figma 生成的完整矢量标记。
 
 `figma_get_image` 按 `imageHash` 返回图片填充中存储的原始编码文件和原始像素尺寸。它不会应用节点上的裁剪、旋转、滤镜、蒙层或混合效果。
 
-两个工具都返回一段 JSON 元数据和一个 MCP 图片内容块。为了避免 Base64 传输超过本地 HTTP bridge 的请求上限，单张图片的原始编码数据最多为 16 MiB。
+为了避免 Base64 传输超过本地 HTTP bridge 的请求上限，单个导出资源的原始编码数据最多为 16 MiB。
 
 ## 多 Agent 使用
 
@@ -121,7 +126,7 @@ Codex 会根据 `[mcp_servers.figmaLocal]` 配置为每个任务拉起短生命�
 - 校验 `Host` 头，降低 DNS rebinding 风险。
 - Agent 只能调用白名单只读命令。
 - 单次请求最多读取 10,000 个节点，默认 2,000 个。
-- 单张导出图片最多 16 MiB，节点导出缩放范围为 `0.01..4`。
+- 单个导出资源最多 16 MiB，PNG/JPG 节点导出缩放范围为 `0.01..4`。
 - 插件只允许访问 `http://localhost:13846`。
 
 设计文件内容会发送给本机已连接的 Agent，因此仅应连接你信任的 Agent。

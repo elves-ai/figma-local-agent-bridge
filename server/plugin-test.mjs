@@ -10,6 +10,9 @@ const pluginSource = await readFile(
 const pngBytes = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ]);
+const svgSource =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 12h16"/></svg>';
+const svgBytes = new Uint8Array(Buffer.from(svgSource, "utf8"));
 const messages = [];
 let exportSettings = null;
 const exportableNode = {
@@ -20,7 +23,7 @@ const exportableNode = {
   height: 266,
   async exportAsync(settings) {
     exportSettings = settings;
-    return pngBytes;
+    return settings.format === "SVG" ? svgBytes : pngBytes;
   },
 };
 const image = {
@@ -108,6 +111,36 @@ assert.equal(exportSettings.constraint.value, 1);
 await figma.ui.onmessage({
   type: "bridge-command",
   command: {
+    id: "svg-export-command",
+    action: "export_node",
+    input: {
+      nodeId: "1:2",
+      format: "SVG",
+      scale: 4,
+      svgOutlineText: false,
+      svgIdAttribute: true,
+      svgSimplifyStroke: false,
+    },
+  },
+});
+const svgExportResult = messages.at(-1);
+assert.equal(svgExportResult.commandId, "svg-export-command");
+assert.equal(svgExportResult.ok, true);
+assert.equal(svgExportResult.data.kind, "node-render");
+assert.equal(svgExportResult.data.format, "SVG");
+assert.equal(svgExportResult.data.mimeType, "image/svg+xml");
+assert.equal(svgExportResult.data.byteLength, svgBytes.length);
+assert.equal(svgExportResult.data.base64, Buffer.from(svgBytes).toString("base64"));
+assert.equal("scale" in svgExportResult.data, false);
+assert.equal(exportSettings.format, "SVG");
+assert.equal("constraint" in exportSettings, false);
+assert.equal(exportSettings.svgOutlineText, false);
+assert.equal(exportSettings.svgIdAttribute, true);
+assert.equal(exportSettings.svgSimplifyStroke, false);
+
+await figma.ui.onmessage({
+  type: "bridge-command",
+  command: {
     id: "image-command",
     action: "get_image",
     input: { imageHash: "image-hash" },
@@ -123,4 +156,4 @@ assert.equal(imageResult.data.height, 1024);
 assert.equal(imageResult.data.byteLength, pngBytes.length);
 assert.equal(imageResult.data.base64, Buffer.from(pngBytes).toString("base64"));
 
-process.stdout.write("Figma plugin image export test passed.\n");
+process.stdout.write("Figma plugin asset export test passed.\n");
