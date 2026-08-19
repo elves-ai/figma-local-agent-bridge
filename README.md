@@ -48,6 +48,12 @@ npm start
 
 免费 Starter 账号可以在 Figma Design 中运行开发插件。
 
+## Codex Figma 读取规则
+
+- **不要使用 `figma-developer-mcp`**，也不要因为用户提供了 Figma 链接而改用远程 Figma MCP、REST API 或内置 Figma Connector。
+- 用户提供 Figma 链接时，直接使用本项目配置的 `figmaLocal` 本地插件桥接器读取；先调用 `figma_bridge_status`，再按任务调用最小范围的本地读取工具。
+- 本地插件只能访问 Figma 桌面版当前打开、已连接的 Design 文件。若链接对应的文件尚未在桌面版打开，请用户先打开该链接对应的文件并在 **Figma Local Agent Bridge** 插件中点击“连接”，然后继续使用 `figmaLocal`。
+
 ## 三、配置 Agent
 
 ### Codex
