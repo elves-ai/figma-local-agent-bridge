@@ -1,6 +1,6 @@
 # Figma Local Agent Bridge
 
-一个免费、只读、完全本地的 Figma Plugin API → MCP 桥接器。它不调用 Figma REST API，因此不消耗 `GET file nodes` 的月度额度。
+一个免费、只读、完全本地的 Figma Plugin API → MCP 桥接器，支持原生 Windows、macOS 和 Linux 环境。它不调用 Figma REST API，因此不消耗 `GET file nodes` 的月度额度。
 
 ## 能做什么
 
@@ -16,15 +16,23 @@
 
 ## 一、安装依赖并启动 bridge
 
-```bash
-cd /home/yangzhe/work/figma-local-agent-bridge/server
+需要 Node.js 20 或更高版本。请将项目放在当前操作系统的本地文件系统中，并使用该系统原生安装的 Node.js。
+
+### Windows（PowerShell）
+
+```powershell
+cd C:\path\to\figma-local-agent-bridge\server
 npm install
 npm start
 ```
 
-需要 Node.js 20 或更高版本。
+### macOS / Linux
 
-MCP 服务和依赖应位于同一个原生文件系统中。Windows Node 直接从 WSL 的 UNC 路径加载大量 npm 模块可能很慢；这种情况下请在 WSL 内安装 Node，或把 `server/` 复制到 Windows 本地目录后运行 `npm install`。
+```bash
+cd /path/to/figma-local-agent-bridge/server
+npm install
+npm start
+```
 
 `npm start` 会在当前终端前台运行独立的 HTTP bridge。保持该终端打开；需要停止服务时按 `Ctrl+C`。
 
@@ -33,35 +41,41 @@ MCP 服务和依赖应位于同一个原生文件系统中。Windows Node 直接
 1. 打开 Figma 桌面版。
 2. 打开任意 Figma Design 文件。
 3. 进入 `Plugins → Development → Import plugin from manifest...`。
-4. 选择 `/home/yangzhe/work/figma-local-agent-bridge/plugin/manifest.json`。
+4. 选择项目中的 `plugin/manifest.json`：
+   - Windows：`C:\path\to\figma-local-agent-bridge\plugin\manifest.json`
+   - macOS / Linux：`/path/to/figma-local-agent-bridge/plugin/manifest.json`
 5. 运行 `Figma Local Agent Bridge`，并保持插件窗口打开。
 
 免费 Starter 账号可以在 Figma Design 中运行开发插件。
-
-如果项目位于 WSL，Windows 文件选择器中的对应路径通常是：
-
-```text
-\\wsl.localhost\<发行版名称>\home\<用户名>\...\tools\figma-local-agent-bridge\plugin\manifest.json
-```
 
 ## 三、配置 Agent
 
 ### Codex
 
-将以下内容加入 Codex 的 MCP 配置；路径替换为本机绝对路径：
+将以下内容加入 Codex 的 MCP 配置，并把路径替换为本机绝对路径。Windows 路径建议使用正斜杠，macOS / Linux 使用标准 POSIX 路径。
 
 ```toml
 [mcp_servers.figmaLocal]
 command = "node"
-args = ["/absolute/path/figma-local-agent-bridge/server/server.mjs"]
+# Windows: C:/path/to/figma-local-agent-bridge/server/server.mjs
+# macOS / Linux: /path/to/figma-local-agent-bridge/server/server.mjs
+args = ["/path/to/figma-local-agent-bridge/server/server.mjs"]
 startup_timeout_sec = 30
 tool_timeout_sec = 60
 ```
 
 ### Claude Code
 
+Windows（PowerShell）：
+
+```powershell
+claude mcp add figma-local -- node C:/path/to/figma-local-agent-bridge/server/server.mjs
+```
+
+macOS / Linux：
+
 ```bash
-claude mcp add figma-local -- node /absolute/path/figma-local-agent-bridge/server/server.mjs
+claude mcp add figma-local -- node /path/to/figma-local-agent-bridge/server/server.mjs
 ```
 
 ### Cursor / VS Code
@@ -72,12 +86,14 @@ claude mcp add figma-local -- node /absolute/path/figma-local-agent-bridge/serve
     "figma-local": {
       "command": "node",
       "args": [
-        "/absolute/path/figma-local-agent-bridge/server/server.mjs"
+        "/path/to/figma-local-agent-bridge/server/server.mjs"
       ]
     }
   }
 }
 ```
+
+Windows 用户可将 `args` 中的路径改为 `C:/path/to/figma-local-agent-bridge/server/server.mjs`。
 
 ## 四、连接插件
 
@@ -88,7 +104,16 @@ claude mcp add figma-local -- node /absolute/path/figma-local-agent-bridge/serve
 
 插件只会在点击“连接”后建立连接。连接期间如果出现短暂网络错误，插件会按 1、2、5、10 秒的退避间隔持续重连；点击“断开”后才会停止重连。
 
-bridge 默认允许心跳中断 30 秒，避免 Figma 切到后台或系统短暂卡顿时误报断开。可通过 `FIGMA_PLUGIN_STALE_AFTER_MS` 调整该阈值，例如：
+bridge 默认允许心跳中断 30 秒，避免 Figma 切到后台或系统短暂卡顿时误报断开。可通过 `FIGMA_PLUGIN_STALE_AFTER_MS` 调整该阈值。
+
+Windows（PowerShell）：
+
+```powershell
+$env:FIGMA_PLUGIN_STALE_AFTER_MS = "45000"
+npm start
+```
+
+macOS / Linux：
 
 ```bash
 FIGMA_PLUGIN_STALE_AFTER_MS=45000 npm start
